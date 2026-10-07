@@ -1,0 +1,8 @@
+<resources>
+    <style name="Theme.MyTunnelApp" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">#5C8A5C</item>
+        <item name="colorPrimaryDark">#1C1C1C</item>
+        <item name="colorAccent">#8BC98B</item>
+        <item name="android:windowBackground">#1C1C1C</item>
+    </style>
+</resources>

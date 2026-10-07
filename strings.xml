@@ -1,0 +1,34 @@
+<resources>
+    <string name="app_name">AF</string>
+    <string name="app_tagline">for foroozan family</string>
+    <string name="connect">connect</string>
+    <string name="disconnect">disconnect</string>
+    <string name="server">server</string>
+    <string name="status_disconnected">Disconnected</string>
+    <string name="status_connecting">Connecting…</string>
+    <string name="status_connected">Connected</string>
+    <string name="country_auto">automatic</string>
+    <string name="speed">speed</string>
+    <string name="choose_server">choose server</string>
+
+    <string-array name="region_names">
+        <item>automatic</item>
+        <item>Germany</item>
+        <item>Netherlands</item>
+        <item>United States</item>
+        <item>United Kingdom</item>
+        <item>Singapore</item>
+        <item>Japan</item>
+        <item>Canada</item>
+    </string-array>
+    <string-array name="region_codes">
+        <item></item>
+        <item>DE</item>
+        <item>NL</item>
+        <item>US</item>
+        <item>GB</item>
+        <item>SG</item>
+        <item>JP</item>
+        <item>CA</item>
+    </string-array>
+</resources>
