@@ -108,6 +108,8 @@ jobs:
               implementation 'ca.psiphon:psiphontunnel:2.0.39'
           }
           GRADLE_APP
+          # Fix: this project uses AndroidX libraries.
+          printf 'android.useAndroidX=true\nandroid.enableJetifier=true\n' > gradle.properties
           gradle --no-daemon :app:assembleDebug
 
       - name: Upload APK
