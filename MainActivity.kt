@@ -49,10 +49,7 @@ class MainActivity : AppCompatActivity(), TunnelService.Listener {
     private var currentThemeColor = colorRed
     private var currentPillColor = colorPillRed
 
-    private val pillDrawable = GradientDrawable().apply {
-        shape = GradientDrawable.RECTANGLE
-        cornerRadius = 24f * resources.displayMetrics.density
-    }
+    private lateinit var pillDrawable: GradientDrawable
 
     private var pulseAnimator: ObjectAnimator? = null
 
@@ -107,7 +104,10 @@ class MainActivity : AppCompatActivity(), TunnelService.Listener {
 
         try {
             setContentView(R.layout.activity_main)
-
+            pillDrawable = GradientDrawable().apply {
+             shape = GradientDrawable.RECTANGLE
+             cornerRadius = 24f * resources.displayMetrics.density
+            }
             connectButton = findViewById(R.id.connectButton)
             statusDot = findViewById(R.id.statusDot)
             diagnosticsText = findViewById(R.id.diagnosticsText)
