@@ -1,3 +1,4 @@
+
 package com.example.mytunnel
 
 import android.animation.ArgbEvaluator
@@ -5,7 +6,6 @@ import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
 import android.app.AlertDialog
 import android.content.ComponentName
-import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.graphics.PorterDuff
@@ -35,10 +35,11 @@ class MainActivity : AppCompatActivity(), TunnelService.Listener {
 
     private var service: TunnelService? = null
     private var bound = false
-    private var currentStatus = TunnelService.Status.DISCONNECTED
+    private var pendingConnect = false
 
-    // theme colors: red when disconnected, green when connected,
-    // amber is used only as the brief mid-point while connecting
+    private var currentStatus =
+        TunnelService.Status.DISCONNECTED
+
     private val colorRed = 0xFFE24B4A.toInt()
     private val colorGreen = 0xFF8BC98B.toInt()
     private val colorAmber = 0xFFF2A93B.toInt()
@@ -47,6 +48,7 @@ class MainActivity : AppCompatActivity(), TunnelService.Listener {
 
     private var currentThemeColor = colorRed
     private var currentPillColor = colorPillRed
+
     private val pillDrawable = GradientDrawable().apply {
         shape = GradientDrawable.RECTANGLE
         cornerRadius = 24f * resources.displayMetrics.density
@@ -54,21 +56,44 @@ class MainActivity : AppCompatActivity(), TunnelService.Listener {
 
     private var pulseAnimator: ObjectAnimator? = null
 
-    // --- speed graph polling ---
     private val speedHandler = Handler(Looper.getMainLooper())
     private var lastRxBytes = 0L
     private var lastSampleTime = 0L
+
     private val speedRunnable = object : Runnable {
         override fun run() {
+            if (isFinishing || isDestroyed) return
             sampleSpeed()
             speedHandler.postDelayed(this, 1000)
         }
     }
 
     private val connection = object : ServiceConnection {
-        override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
-            service = (binder as TunnelService.LocalBinder).getService()
+
+        override fun onServiceConnected(
+            name: ComponentName?,
+            binder: IBinder?
+        ) {
+            val localBinder = binder as? TunnelService.LocalBinder
+
+            if (localBinder == null) {
+                pendingConnect = false
+                diagnosticsText.text = "خطا: اتصال به سرویس برقرار نشد."
+                return
+            }
+
+            service = localBinder.getService()
             bound = true
+
+            if (pendingConnect) {
+                pendingConnect = false
+                try {
+                    service?.start()
+                } catch (e: Exception) {
+                    diagnosticsText.text =
+                        "خطا در اتصال: ${e.javaClass.simpleName}: ${e.message ?: "نامشخص"}"
+                }
+            }
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
@@ -79,64 +104,146 @@ class MainActivity : AppCompatActivity(), TunnelService.Listener {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
 
-        connectButton = findViewById(R.id.connectButton)
-        statusDot = findViewById(R.id.statusDot)
-        diagnosticsText = findViewById(R.id.diagnosticsText)
-        logoImage = findViewById(R.id.logoImage)
-        serverPill = findViewById(R.id.serverPill)
-        countryLabel = findViewById(R.id.countryLabel)
-        speedGraph = findViewById(R.id.speedGraph)
+        try {
+            setContentView(R.layout.activity_main)
 
-        serverPill.background = pillDrawable
-        applyTheme(colorRed, colorPillRed)
+            connectButton = findViewById(R.id.connectButton)
+            statusDot = findViewById(R.id.statusDot)
+            diagnosticsText = findViewById(R.id.diagnosticsText)
+            logoImage = findViewById(R.id.logoImage)
+            serverPill = findViewById(R.id.serverPill)
+            countryLabel = findViewById(R.id.countryLabel)
+            speedGraph = findViewById(R.id.speedGraph)
 
-        connectButton.setOnClickListener {
-            when (currentStatus) {
-                TunnelService.Status.DISCONNECTED -> service?.start()
-                TunnelService.Status.CONNECTED,
-                TunnelService.Status.CONNECTING -> service?.stop()
+            serverPill.background = pillDrawable
+            applyTheme(colorRed, colorPillRed)
+
+            TunnelService.listener = this
+
+            connectButton.setOnClickListener {
+                when (currentStatus) {
+                    TunnelService.Status.DISCONNECTED -> {
+                        if (service != null) {
+                            try {
+                                service?.start()
+                            } catch (e: Exception) {
+                                diagnosticsText.text =
+                                    "خطا: ${e.javaClass.simpleName}: ${e.message ?: "نامشخص"}"
+                            }
+                        } else {
+                            pendingConnect = true
+                            startTunnelServiceSafely()
+                        }
+                    }
+
+                    TunnelService.Status.CONNECTED,
+                    TunnelService.Status.CONNECTING -> {
+                        try {
+                            service?.stop()
+                        } catch (e: Exception) {
+                            diagnosticsText.text =
+                                "خطا هنگام قطع اتصال: ${e.message ?: "نامشخص"}"
+                        }
+                    }
+                }
             }
+
+            serverPill.setOnClickListener {
+                showCountryPicker()
+            }
+
+            lastRxBytes = TrafficStats.getTotalRxBytes()
+            lastSampleTime = System.currentTimeMillis()
+            speedHandler.post(speedRunnable)
+
+        } catch (e: Exception) {
+            android.util.Log.e(
+                "MyTunnelApp",
+                "MainActivity initialization failed",
+                e
+            )
+            throw e
         }
+    }
 
-        // tap the server pill to pick which country to connect through
-        serverPill.setOnClickListener { showCountryPicker() }
+    private fun startTunnelServiceSafely() {
+        try {
+            val intent = Intent(this, TunnelService::class.java)
 
-        TunnelService.listener = this
+            ContextCompat.startForegroundService(this, intent)
 
-        val intent = Intent(this, TunnelService::class.java)
-        ContextCompat.startForegroundService(this, intent)
-        bindService(intent, connection, Context.BIND_AUTO_CREATE)
+            if (!bound) {
+                val bindStarted = bindService(
+                    intent,
+                    connection,
+                    BIND_AUTO_CREATE
+                )
 
-        lastRxBytes = TrafficStats.getTotalRxBytes()
-        lastSampleTime = System.currentTimeMillis()
-        speedHandler.post(speedRunnable)
+                if (!bindStarted) {
+                    pendingConnect = false
+                    diagnosticsText.text =
+                        "خطا: اتصال به سرویس برقرار نشد."
+                }
+            }
+        } catch (e: Exception) {
+            pendingConnect = false
+
+            android.util.Log.e(
+                "MyTunnelApp",
+                "Could not start VPN service",
+                e
+            )
+
+            diagnosticsText.text =
+                "خطای سرویس: ${e.javaClass.simpleName}: ${e.message ?: "نامشخص"}"
+        }
     }
 
     override fun onDestroy() {
-        super.onDestroy()
         speedHandler.removeCallbacks(speedRunnable)
+        pulseAnimator?.cancel()
+
         if (bound) {
-            unbindService(connection)
+            try {
+                unbindService(connection)
+            } catch (e: Exception) {
+                android.util.Log.e(
+                    "MyTunnelApp",
+                    "Unbind failed",
+                    e
+                )
+            }
             bound = false
         }
-        TunnelService.listener = null
+
+        if (TunnelService.listener === this) {
+            TunnelService.listener = null
+        }
+
+        super.onDestroy()
     }
 
     private fun showCountryPicker() {
         val names = resources.getStringArray(R.array.region_names)
         val codes = resources.getStringArray(R.array.region_codes)
+
         AlertDialog.Builder(this)
             .setTitle(R.string.choose_server)
             .setItems(names) { _, which ->
+                if (which !in codes.indices) return@setItems
+
                 TunnelService.selectedRegion = codes[which]
                 countryLabel.text = names[which]
-                // changing region only takes effect on the next connect;
-                // if we're already connected, reconnect through the new one
+
                 if (currentStatus != TunnelService.Status.DISCONNECTED) {
-                    service?.stop()
-                    service?.start()
+                    try {
+                        service?.stop()
+                        service?.start()
+                    } catch (e: Exception) {
+                        diagnosticsText.text =
+                            "خطا در تغییر سرور: ${e.message ?: "نامشخص"}"
+                    }
                 }
             }
             .show()
@@ -145,12 +252,18 @@ class MainActivity : AppCompatActivity(), TunnelService.Listener {
     private fun sampleSpeed() {
         val now = System.currentTimeMillis()
         val rx = TrafficStats.getTotalRxBytes()
+
         if (lastRxBytes > 0 && rx >= lastRxBytes) {
             val deltaBytes = rx - lastRxBytes
-            val deltaSeconds = ((now - lastSampleTime).coerceAtLeast(1)) / 1000f
-            val kbPerSecond = (deltaBytes / 1024f) / deltaSeconds
+            val elapsedMs =
+                (now - lastSampleTime).coerceAtLeast(1)
+
+            val kbPerSecond =
+                (deltaBytes / 1024f) / (elapsedMs / 1000f)
+
             speedGraph.addSample(kbPerSecond)
         }
+
         lastRxBytes = rx
         lastSampleTime = now
     }
@@ -158,22 +271,31 @@ class MainActivity : AppCompatActivity(), TunnelService.Listener {
     override fun onStatusChanged(status: TunnelService.Status) {
         runOnUiThread {
             currentStatus = status
+
             when (status) {
                 TunnelService.Status.DISCONNECTED -> {
                     connectButton.text = getString(R.string.connect)
-                    statusDot.setBackgroundResource(R.drawable.status_dot_disconnected)
+                    statusDot.setBackgroundResource(
+                        R.drawable.status_dot_disconnected
+                    )
                     stopPulse()
                     animateTheme(colorRed, colorPillRed)
                 }
+
                 TunnelService.Status.CONNECTING -> {
                     connectButton.text = getString(R.string.disconnect)
-                    statusDot.setBackgroundResource(R.drawable.status_dot_connecting)
+                    statusDot.setBackgroundResource(
+                        R.drawable.status_dot_connecting
+                    )
                     animateTheme(colorAmber, colorPillRed)
                     startPulse()
                 }
+
                 TunnelService.Status.CONNECTED -> {
                     connectButton.text = getString(R.string.disconnect)
-                    statusDot.setBackgroundResource(R.drawable.status_dot_connected)
+                    statusDot.setBackgroundResource(
+                        R.drawable.status_dot_connected
+                    )
                     stopPulse()
                     animateTheme(colorGreen, colorPillGreen)
                 }
@@ -187,41 +309,76 @@ class MainActivity : AppCompatActivity(), TunnelService.Listener {
         }
     }
 
-    // smoothly fades the theme (connect text + logo tint + server pill)
-    // from whatever color it is now to the target
-    private fun animateTheme(toTextColor: Int, toPill: Int) {
+    private fun animateTheme(
+        toTextColor: Int,
+        toPill: Int
+    ) {
         val fromText = currentThemeColor
         val fromPill = currentPillColor
+
         ValueAnimator.ofFloat(0f, 1f).apply {
             duration = 400
-            addUpdateListener { anim ->
-                val fraction = anim.animatedFraction
-                val textColor = ArgbEvaluator().evaluate(fraction, fromText, toTextColor) as Int
-                val pillColor = ArgbEvaluator().evaluate(fraction, fromPill, toPill) as Int
+
+            addUpdateListener { animator ->
+                val fraction = animator.animatedFraction
+
+                val textColor = ArgbEvaluator().evaluate(
+                    fraction,
+                    fromText,
+                    toTextColor
+                ) as Int
+
+                val pillColor = ArgbEvaluator().evaluate(
+                    fraction,
+                    fromPill,
+                    toPill
+                ) as Int
+
                 applyTheme(textColor, pillColor)
             }
+
             start()
         }
+
         currentThemeColor = toTextColor
         currentPillColor = toPill
     }
 
-    private fun applyTheme(textColor: Int, pillColor: Int) {
+    private fun applyTheme(
+        textColor: Int,
+        pillColor: Int
+    ) {
         connectButton.setTextColor(textColor)
-        logoImage.setColorFilter(textColor, PorterDuff.Mode.SRC_IN)
+        logoImage.setColorFilter(
+            textColor,
+            PorterDuff.Mode.SRC_IN
+        )
         pillDrawable.setColor(pillColor)
     }
 
-    // gentle breathing scale animation on the logo while connecting
     private fun startPulse() {
         if (pulseAnimator?.isRunning == true) return
-        pulseAnimator = ObjectAnimator.ofFloat(logoImage, View.SCALE_X, 1f, 1.08f, 1f).apply {
+
+        pulseAnimator = ObjectAnimator.ofFloat(
+            logoImage,
+            View.SCALE_X,
+            1f,
+            1.08f,
+            1f
+        ).apply {
             duration = 900
             repeatCount = ValueAnimator.INFINITE
             interpolator = LinearInterpolator()
             start()
         }
-        ObjectAnimator.ofFloat(logoImage, View.SCALE_Y, 1f, 1.08f, 1f).apply {
+
+        ObjectAnimator.ofFloat(
+            logoImage,
+            View.SCALE_Y,
+            1f,
+            1.08f,
+            1f
+        ).apply {
             duration = 900
             repeatCount = ValueAnimator.INFINITE
             interpolator = LinearInterpolator()
@@ -232,6 +389,7 @@ class MainActivity : AppCompatActivity(), TunnelService.Listener {
     private fun stopPulse() {
         pulseAnimator?.cancel()
         pulseAnimator = null
+
         logoImage.scaleX = 1f
         logoImage.scaleY = 1f
     }
