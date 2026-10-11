@@ -40,5 +40,5 @@ dependencies {
     // Psiphon's official Maven repo (declared in settings.gradle) — check
     // https://github.com/Psiphon-Labs/psiphon-tunnel-core-Android-library
     // for the latest version before building for real.
-    implementation 'ca.psiphon:psiphontunnel:2.0.39'
+    implementation 'ca.psiphon:psiphontunnel:2.0.40'
 }
